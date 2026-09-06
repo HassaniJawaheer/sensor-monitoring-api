@@ -1,227 +1,354 @@
-## Objectif de cette étape
+# Design notes — Sensor Monitoring API
 
-Transformer les cas d’usage et les responsabilités identifiées précédemment en grands composants concrets à développer.
+Notes sur la démarche utilisée pour passer du cahier des charges à une première architecture.
+---
 
-À ce stade, on ne définit pas encore toutes les fonctions, signatures ou classes. On cherche simplement à obtenir une carte suffisamment claire pour pouvoir commencer à coder sans devoir redécider constamment de l’organisation générale du projet.
+# 1. Partir des cas d'usage
 
-## Méthode générale
+Avant de penser aux routes, fichiers ou classes, traduire le besoin en actions métier.
 
-À partir de l’ensemble des cas d’usage :
+Pour chaque action :
 
-1. Identifier les concepts ou données principales manipulées.
-2. Regrouper les opérations qui concernent le même domaine.
-3. Isoler les opérations de persistance.
-4. Isoler la logique métier.
-5. Identifier la couche qui expose les fonctionnalités à l’extérieur.
-6. Identifier les éléments techniques nécessaires au fonctionnement de l’application.
-7. Transformer ces groupes en composants/modules potentiels.
-8. Décider seulement ensuite si chaque composant sera implémenté avec des fonctions, des classes ou une combinaison des deux.
+1. Que veut faire l'utilisateur ?
+2. Quelles informations sont nécessaires ?
+3. Quel résultat doit être retourné ?
 
-Raccourci mental :
+Raccourci :
 
-cas d’usage
-→ responsabilités
-→ regroupements fonctionnels
-→ composants
-→ fichiers/modules
-→ code
+`besoin → action → entrées → sortie`
+
+## Application au projet
+
+| Cas d'usage              | Entrées                        | Sortie                             |
+| ------------------------ | ------------------------------ | ---------------------------------- |
+| Créer un capteur         | informations du capteur        | capteur créé + ID                  |
+| Consulter un capteur     | sensor ID                      | métadonnées                        |
+| Lister les capteurs      | —                              | liste des capteurs                 |
+| Supprimer un capteur     | sensor ID                      | confirmation / absence de résultat |
+| Ajouter une mesure       | sensor ID, timestamp, valeur   | mesure créée / confirmation        |
+| Récupérer les mesures    | sensor ID, période optionnelle | liste de mesures                   |
+| Obtenir les statistiques | sensor ID, période optionnelle | résumé statistique                 |
+| Récupérer les anomalies  | sensor ID, période optionnelle | mesures hors plage                 |
+
+À ce stade, ne pas encore penser JSON, FastAPI, SQL ou structure des fichiers.
 
 ---
 
-# Application au projet Sensor Monitoring API
+# 2. Définir validations et cas limites
 
-## 1. Gestion des capteurs
+Pour chaque cas d'usage, vérifier :
 
-Responsabilité :
+* les données sont-elles présentes et correctement typées ?
+* la ressource existe-t-elle ?
+* les règles métier sont-elles respectées ?
+* que faire lorsqu'il n'y a aucun résultat ?
 
-Gérer les métadonnées des capteurs.
+Raccourci :
 
-Doit permettre notamment :
+`cas d'usage → données valides ? → ressource existe ? → règle métier ? → absence de résultat ?`
 
-* créer un capteur ;
-* récupérer un capteur ;
-* lister les capteurs ;
-* supprimer un capteur ;
-* vérifier l’existence d’un capteur.
+## Décisions du projet
 
-Les informations décrivant un capteur sont persistées dans la base.
+### Capteurs
 
-Il n’est pas nécessaire de créer une classe métier complexe `Sensor` si elle n’apporte aucun comportement utile.
+Création :
+
+* champs obligatoires et types valides ;
+* `min_valid_value <= max_valid_value` ;
+* ID généré par le système ;
+* décider si certains champs, par exemple `name`, doivent être uniques.
+
+Consultation / suppression :
+
+* le capteur doit exister ;
+* sinon retourner une erreur explicite.
+
+Liste :
+
+* aucun capteur → liste vide.
+
+Pour la suppression, décider ce qu'il advient des mesures associées.
+
+### Mesures
+
+Création :
+
+* structure et types valides ;
+* le capteur doit exister.
+
+Une valeur hors plage **reste une mesure valide**. Elle doit pouvoir être enregistrée afin d'être détectée comme anomalie.
+
+Consultation :
+
+* le capteur doit exister ;
+* une période éventuelle doit être cohérente ;
+* aucune mesure → liste vide.
+
+### Statistiques
+
+* le capteur doit exister ;
+* la période doit être valide ;
+* gérer explicitement le cas sans mesure ;
+* avec des données : `count`, `min`, `max`, `mean`.
+
+### Anomalies
+
+* le capteur doit exister ;
+* la période doit être valide ;
+* aucune anomalie → liste vide.
+
+## Deux types de validation
+
+**Validation structurelle**
+
+Exemples : champ manquant, mauvais type, timestamp mal formé.
+
+Une grande partie pourra être prise en charge par FastAPI/Pydantic.
+
+**Validation métier**
+
+Exemples : capteur inexistant, bornes incohérentes, période invalide.
+
+Elle dépend des règles de l'application.
 
 ---
 
-## 2. Gestion des mesures
+# 3. Identifier les responsabilités
 
-Responsabilité :
+Décomposer ensuite chaque cas d'usage en étapes et déterminer à quelle responsabilité appartient chaque étape.
 
-Gérer les mesures produites par les capteurs.
+Quatre grandes responsabilités :
 
-Doit permettre notamment :
+### API / HTTP
+
+* recevoir la requête ;
+* lire les paramètres ;
+* appeler le reste du système ;
+* retourner la réponse ;
+* traduire les erreurs en réponses HTTP adaptées.
+
+### Validation
+
+* structures et types ;
+* identifiants ;
+* périodes ;
+* règles de cohérence.
+
+### Persistance
+
+* créer, lire et supprimer les données ;
+* gérer SQLite et les relations entre données.
+
+### Logique métier
+
+* statistiques ;
+* détection des anomalies ;
+* autres règles propres au domaine.
+
+Un cas d'usage traverse généralement plusieurs responsabilités.
+
+Exemple :
+
+`POST mesure`
+
+→ HTTP reçoit la requête
+→ validation de l'entrée
+→ vérification du capteur en base
+→ enregistrement de la mesure
+→ réponse HTTP
+
+---
+
+# 4. Passer des responsabilités aux composants
+
+Une fois les cas d'usage et responsabilités compris :
+
+1. identifier les données/concepts principaux ;
+2. regrouper les opérations liées ;
+3. isoler la persistance ;
+4. isoler la logique métier ;
+5. identifier la couche API ;
+6. ajouter les besoins techniques ;
+7. transformer ces groupes en modules ;
+8. décider seulement ensuite si fonctions ou classes sont nécessaires.
+
+Raccourci :
+
+`cas d'usage → responsabilités → composants → modules → code`
+
+Ne pas créer une classe simplement parce qu'un concept métier existe. Une classe doit apporter quelque chose : état, comportement, encapsulation, etc.
+
+---
+
+# 5. Composants retenus pour le projet
+
+## Gestion des capteurs
+
+Gère les métadonnées des capteurs :
+
+* création ;
+* récupération ;
+* liste ;
+* suppression ;
+* vérification d'existence.
+
+Pas besoin a priori d'une classe métier `Sensor` complexe.
+
+## Gestion des mesures
 
 * enregistrer une mesure ;
-* récupérer les mesures d’un capteur ;
-* récupérer les mesures sur une période ;
-* gérer le cas d’un capteur sans mesure.
+* récupérer les mesures d'un capteur ;
+* filtrer par période ;
+* gérer l'absence de mesures.
 
-Une mesure reste enregistrable même si sa valeur est située hors de la plage normale du capteur.
+Une mesure hors plage reste enregistrable.
 
----
+## Persistance / SQLite
 
-## 3. Persistance / SQLite
+Centralise l'accès aux données :
 
-Responsabilité :
+* configuration et initialisation SQLite ;
+* structures capteurs/mesures ;
+* relation mesure → capteur ;
+* opérations de lecture/écriture nécessaires.
 
-Centraliser l’accès aux données persistantes.
+Éviter de disperser les détails SQL dans la logique métier.
 
-Doit permettre notamment :
+## Statistiques
 
-* initialiser la base SQLite ;
-* définir les structures nécessaires pour les capteurs et les mesures ;
-* gérer la relation entre une mesure et son capteur ;
-* créer, lire et supprimer des capteurs ;
-* créer et lire des mesures ;
-* effectuer les requêtes nécessaires aux autres composants.
+Produit pour un capteur et éventuellement une période :
 
-La logique métier ne doit pas dépendre directement des détails SQL lorsqu’il est raisonnable de les isoler.
+* `count`
+* `min`
+* `max`
+* `mean`
 
----
+Gère également le cas sans données.
 
-## 4. Statistiques
+Pas besoin d'une fonction ou méthode différente pour chaque statistique si un résumé unique suffit.
 
-Responsabilité :
+## Anomalies
 
-Produire un résumé statistique des mesures d’un capteur, éventuellement sur une période.
+Règle métier :
 
-Le résumé demandé contient au minimum :
-
-* nombre de mesures ;
-* minimum ;
-* maximum ;
-* moyenne.
-
-Le composant doit également gérer explicitement le cas où aucune mesure n’est disponible.
-
-Il n’est pas nécessaire de créer une méthode indépendante pour chaque statistique si un calcul de résumé unique suffit.
-
----
-
-## 5. Détection des anomalies
-
-Responsabilité :
-
-Identifier les mesures qui violent les bornes métier définies pour un capteur.
-
-Une mesure est anormale lorsque :
-
-value < min_valid_value
-
+`value < min_valid_value`
 ou
+`value > max_valid_value`
 
-value > max_valid_value
+Il s'agit d'une détection par **bornes métier**, pas d'une détection statistique d'outliers.
 
-Cette détection est distincte d’une détection statistique d’outliers.
+## Validation
 
-Pour ce projet, on reste uniquement sur les bornes métier.
+Définit et contrôle notamment :
 
----
+* création des capteurs ;
+* création des mesures ;
+* champs et types ;
+* bornes ;
+* périodes ;
+* structures de sortie.
 
-## 6. Validation des données
+FastAPI/Pydantic prendra en charge une partie de ce travail.
 
-Responsabilité :
+## API / routes
 
-Définir les structures attendues par l’application et vérifier leur cohérence.
-
-Doit notamment permettre de valider :
-
-* création d’un capteur ;
-* création d’une mesure ;
-* types des champs ;
-* champs obligatoires ;
-* bornes du capteur ;
-* paramètres temporels ;
-* structures retournées par certains endpoints.
-
-Une partie de cette validation pourra être assurée naturellement par FastAPI/Pydantic.
-
----
-
-## 7. API / routes
-
-Responsabilité :
-
-Exposer les cas d’usage via HTTP.
-
-Les grandes familles fonctionnelles seront :
+Familles principales :
 
 * capteurs ;
 * mesures ;
 * statistiques ;
 * anomalies.
 
-Les routes doivent principalement :
+Une route doit rester légère :
 
-1. recevoir la requête ;
-2. récupérer les paramètres ;
-3. appeler le composant approprié ;
-4. transformer les erreurs métier en réponses HTTP adaptées ;
-5. retourner le résultat.
+`requête → paramètres → appel du composant → gestion erreur HTTP → réponse`
 
-La logique métier importante ne doit pas être écrite directement dans les routes si elle peut être isolée proprement.
+La logique métier importante ne doit pas vivre directement dans les routes.
 
----
+## Initialisation
 
-## 8. Initialisation de l’application
+Partie légère chargée de :
 
-Responsabilité :
+* créer l'application FastAPI ;
+* configurer SQLite ;
+* initialiser les tables ;
+* intégrer les routes.
 
-Permettre à l’application de démarrer correctement.
+## Tests
 
-Doit notamment gérer :
+Responsabilité transverse couvrant :
 
-* création de l’application FastAPI ;
-* connexion/configuration de SQLite ;
-* initialisation des tables ;
-* intégration des différentes routes.
-
-Cette partie doit rester légère.
-
----
-
-## 9. Tests
-
-Responsabilité :
-
-Vérifier que les comportements importants restent corrects.
-
-Les tests devront couvrir notamment :
-
-* gestion des capteurs ;
-* enregistrement des mesures ;
-* validations importantes ;
-* récupération par période ;
+* capteurs ;
+* mesures ;
+* validations ;
+* périodes ;
 * statistiques ;
 * anomalies ;
-* cas d’erreur principaux.
-
-Les tests sont une responsabilité transverse : ils vérifient plusieurs composants plutôt que de constituer une fonctionnalité métier.
+* erreurs principales.
 
 ---
 
-# Carte fonctionnelle simplifiée
+# 6. Vue globale
 
+Flux simplifié :
+
+```text
 API / routes
-↓
+      ↓
 validation
-↓
-gestion capteurs / gestion mesures
-↓
-stats / anomalies lorsque nécessaire
-↓
+      ↓
+gestion capteurs / mesures
+      ↓
+logique métier (stats / anomalies)
+      ↓
 persistance SQLite
+```
 
-Avec comme éléments transverses :
+Ce schéma est une vue conceptuelle, pas une obligation de faire exactement un fichier ou une classe par bloc.
 
-* initialisation/configuration ;
-* tests.
+---
 
+# 7. Plan d'implémentation
+
+1. Repo + environnement Python
+2. Dépendances
+3. Structure minimale du projet
+4. SQLite
+5. Modèles/structures capteurs et mesures
+6. Gestion des capteurs
+7. Routes capteurs
+8. Gestion des mesures
+9. Routes mesures
+10. Statistiques
+11. Détection des anomalies
+12. Routes stats/anomalies
+13. Tests
+14. Génération de données de démonstration
+15. Nettoyage + README
+
+---
+
+# Méthode à retenir
+
+Pour un futur projet similaire :
+
+```text
+Cahier des charges
+        ↓
+Cas d'usage
+        ↓
+Entrées / sorties
+        ↓
+Validations et cas limites
+        ↓
+Responsabilités
+        ↓
+Composants
+        ↓
+Modules / architecture
+        ↓
+Implémentation
+        ↓
+Tests
+```
 
