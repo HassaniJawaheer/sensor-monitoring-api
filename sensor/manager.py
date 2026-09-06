@@ -11,4 +11,4 @@ def create_sensor(sensor_metadata: SensorMetadata):
     return sensor_id
 
 def get_sensor(sensor_id: str) -> dict[str, str]:
-    
+    sensor_storage = SensorStorage(db_path)
