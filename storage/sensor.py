@@ -71,7 +71,7 @@ class SensorStorage:
 
         return sensor_id
 
-    def store_measurement(self, measurement: dict) -> int:
+    def store_measurement(self, measurement: dict):
         """Insert a new measurement and return its generated ID."""
         conn = self._connect()
         cursor = conn.cursor()
@@ -129,3 +129,25 @@ class SensorStorage:
         conn.close()
 
         return [dict(row) for row in rows]
+
+    def delete_sensor(self, sensor_id: int) -> bool:
+        """Delete a sensor. Return True if it existed, otherwise False."""
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            DELETE FROM sensors
+            WHERE id = ?
+            """,
+            (sensor_id,)
+        )
+
+        deleted = cursor.rowcount > 0
+
+        conn.commit()
+        conn.close()
+
+        return deleted
+
+
