@@ -150,4 +150,35 @@ class SensorStorage:
 
         return deleted
 
+    def fetch_measurements(
+        self,
+        sensor_id: int,
+        start_timestamp: str | None = None,
+        end_timestamp: str | None = None
+    ) -> list[dict]:
+        """Retrieve measurements."""
+        conn = self._connect()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
+        query = """
+            SELECT *
+            FROM measurements
+            WHERE sensor_id = ?
+        """
+        params = [sensor_id]
+
+        if start_timestamp is not None:
+            query += " AND timestamp >= ?"
+            params.append(start_timestamp)
+
+        if end_timestamp is not None:
+            query += " AND timestamp <= ?"
+            params.append(end_timestamp)
+
+        cursor.execute(query, params)
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
