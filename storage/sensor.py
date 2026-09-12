@@ -130,6 +130,22 @@ class SensorStorage:
 
         return [dict(row) for row in rows]
 
+    def fetch_sensors_id(self):
+        conn = self._connect()
+        conn.row_factory = sqlite3.Row
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM sensors
+        """
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [row["id"] for row in rows]
+
+    
     def delete_sensor(self, sensor_id: int) -> bool:
         """Delete a sensor. Return True if it existed, otherwise False."""
         conn = self._connect()
