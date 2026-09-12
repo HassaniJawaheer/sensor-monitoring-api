@@ -1,2 +1,4 @@
-# Python virtual environment
+__pycache__/
+*.pyc
 .venv/
+*.db
