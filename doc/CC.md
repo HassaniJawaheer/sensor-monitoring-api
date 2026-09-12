@@ -173,15 +173,3 @@ Le projet est considéré terminé si :
 7. les erreurs principales sont gérées ;
 8. les tests essentiels passent ;
 9. l'architecture du code est claire et justifiable.
-
-## Bonus
-
-Seulement si le cœur du projet est terminé, ajouter éventuellement **un seul** bonus :
-
-* pagination ;
-* capteurs actuellement hors plage ;
-* import CSV ;
-* export CSV ;
-* écart-type ;
-* endpoint `/health` ;
-* configuration par variables d'environnement.
